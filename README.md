@@ -66,8 +66,8 @@ An autonomous, high-performance Bash script for digital evidence collection (**T
 
 ### 1. Clone or Download the Script
 ```bash
-git clone https://github.com/<your-username>/<your-repo>.git
-cd <your-repo>
+git clone https://github.com/Asw3x/zimbra-ir-triage.git
+cd zimbra-ir-triage
 ```
 
 ### 2. Run as Root on the Zimbra Server
