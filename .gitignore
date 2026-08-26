@@ -1,0 +1,3 @@
+﻿deploy_git.ps1
+deploy_git.py
+*.tmp
