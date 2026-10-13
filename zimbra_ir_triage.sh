@@ -2,7 +2,7 @@
 # ==============================================================================
 # Script: zimbra_ir_triage.sh
 # Purpose: Autonomous Comprehensive Incident Response & Forensic Triage for ZCS
-# Author: SecOps / Incident Response Specialist
+# Author: Aleksey Kostin — https://github.com/Asw3x
 # Mode: Read-Only (Non-destructive, zero state change, 100% passive audit)
 # Compatible: RHEL/CentOS/Rocky/Alma/Debian/Ubuntu running Zimbra 8.x / 9.x / 10.x
 # ==============================================================================
