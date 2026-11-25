@@ -8,6 +8,7 @@
 # ==============================================================================
 
 set -uo pipefail
+umask 077
 
 # ------------------------------------------------------------------------------
 # 0. CONFIGURATION, COLORS & INITIALIZATION
@@ -132,7 +133,7 @@ touch "${REPORT_FILE}" 2>/dev/null || {
 log_raw "${CYAN}${BOLD}"
 log_raw "################################################################################"
 log_raw "#            ZIMBRA (ZCS) INCIDENT RESPONSE & FORENSIC TRIAGE TOOL             #"
-log_raw "#             Automated Digital Evidence Collector (T-9 Days Post-IR)          #"
+log_raw "#                 Automated Digital Evidence Collector                         #"
 log_raw "#                    Mode: 100% Passive / Read-Only Audit                      #"
 log_raw "################################################################################"
 log_raw "${RESET}"
@@ -751,15 +752,15 @@ SUSPICIOUS_SIGNATURES=(
 
 log_sub "Scanning Web Logs for CVE Signatures & Exploitation Attempts"
 EXPLOIT_HITS_TMP="${TEMP_DIR}/exploit_hits.txt"
+WEB_SIGS_TMP="${TEMP_DIR}/web_sigs.txt"
+printf '%s\n' "${SUSPICIOUS_SIGNATURES[@]}" > "${WEB_SIGS_TMP}"
 
-for pattern in "${SUSPICIOUS_SIGNATURES[@]}"; do
-    for f in "${FOUND_WEB_LOGS[@]}"; do
-        if [[ "${f}" == *.gz ]]; then
-            gzip -dc "${f}" 2>/dev/null | grep -iF "${pattern}" >> "${EXPLOIT_HITS_TMP}" || true
-        else
-            grep -iF "${pattern}" "${f}" 2>/dev/null >> "${EXPLOIT_HITS_TMP}" || true
-        fi
-    done
+for f in "${FOUND_WEB_LOGS[@]}"; do
+    if [[ "${f}" == *.gz ]]; then
+        gzip -dc "${f}" 2>/dev/null | grep -iFf "${WEB_SIGS_TMP}" >> "${EXPLOIT_HITS_TMP}" || true
+    else
+        grep -iFf "${WEB_SIGS_TMP}" "${f}" 2>/dev/null >> "${EXPLOIT_HITS_TMP}" || true
+    fi
 done
 
 if [[ -s "${EXPLOIT_HITS_TMP}" ]]; then
@@ -843,25 +844,26 @@ fi
 log_header "MODULE 6: PERSISTENCE, MEMORY FORENSICS & WEB SHELL HUNTING"
 
 log_sub "Memory Forensics: Deleted Executables in RAM (/proc/*/exe)"
-DELETED_PROCS=$(ls -l /proc/[0-9]*/exe 2>/dev/null | grep '(deleted)' || true)
+for exe_link in /proc/[0-9]*/exe; do
+    [[ -L "${exe_link}" ]] || continue
+    RAW_TARGET=$(readlink "${exe_link}" 2>/dev/null || continue)
+    [[ "${RAW_TARGET}" == *" (deleted)" ]] || continue
 
-if [[ -n "${DELETED_PROCS}" ]]; then
-    while IFS= read -r dline; do
-        TARGET_PATH=$(echo "${dline}" | awk '{print $NF}' | sed 's/ (deleted)//')
-        PID=$(echo "${dline}" | awk '{print $9}' | cut -d/ -f3)
-        CMDLINE=$(tr '\0' ' ' < "/proc/${PID}/cmdline" 2>/dev/null || echo "N/A")
-        PROC_USER=$(stat -c '%U' "/proc/${PID}" 2>/dev/null || echo "N/A")
+    TARGET_PATH="${RAW_TARGET% (deleted)}"
+    PID="${exe_link#/proc/}"
+    PID="${PID%/exe}"
+    CMDLINE=$(tr '\0' ' ' < "/proc/${PID}/cmdline" 2>/dev/null || echo "N/A")
+    PROC_USER=$(stat -c '%U' "/proc/${PID}" 2>/dev/null || echo "N/A")
 
-        if echo "${TARGET_PATH}" | grep -qE '(/tmp/|/var/tmp/|/dev/shm/|\.sh|\.py|\.pl|\.php|/tmp)'; then
-            log_alert "MALICIOUS MEMORY PROCESS (PID ${PID}, User: ${PROC_USER}): ${RED}${TARGET_PATH} (DELETED)${RESET}"
-            log_raw "    -> Cmdline: ${BOLD}${CMDLINE}${RESET}"
-            FINDING_MEMORY_DELETED=$((FINDING_MEMORY_DELETED + 1))
-        elif ! echo "${TARGET_PATH}" | grep -qE '(mysqld|java|slapd|nginx|postfix|systemd|postgres|amavis)'; then
-            log_warn "Process running from deleted executable (PID ${PID}, User: ${PROC_USER}): ${TARGET_PATH}"
-            log_raw "    -> Cmdline: ${CMDLINE}"
-        fi
-    done <<< "${DELETED_PROCS}"
-fi
+    if echo "${TARGET_PATH}" | grep -qE '(/tmp/|/var/tmp/|/dev/shm/|\.sh|\.py|\.pl|\.php)'; then
+        log_alert "MALICIOUS MEMORY PROCESS (PID ${PID}, User: ${PROC_USER}): ${RED}${TARGET_PATH} (DELETED)${RESET}"
+        log_raw "    -> Cmdline: ${BOLD}${CMDLINE}${RESET}"
+        FINDING_MEMORY_DELETED=$((FINDING_MEMORY_DELETED + 1))
+    elif ! echo "${TARGET_PATH}" | grep -qE '(mysqld|java|slapd|nginx|postfix|systemd|postgres|amavis)'; then
+        log_warn "Process running from deleted executable (PID ${PID}, User: ${PROC_USER}): ${TARGET_PATH}"
+        log_raw "    -> Cmdline: ${CMDLINE}"
+    fi
+done
 
 if [[ ${FINDING_MEMORY_DELETED} -eq 0 ]]; then
     log_ok "No spambots or hidden payloads detected running from deleted binaries in RAM."
